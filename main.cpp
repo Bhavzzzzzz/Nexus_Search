@@ -2,11 +2,20 @@
 #include <regex>
 #include <thread>
 #include <chrono>
-#include <curl/curl.h> // The HTTP library
+#include <atomic>
+#include <mutex>
+#include <curl/curl.h> 
 #include "src/URLFrontier.h"
-using namespace std;
+
+// Thread-safe counter to limit the prototype run
+atomic<int> pagesCrawled(0);
+const int MAX_PAGES = 50;
+
+// Mutex to prevent jumbled terminal output
+mutex coutMutex; 
+
 // ---------------------------------------------------------
-// libcurl Callback: Writes downloaded data into a string
+// libcurl Callback
 // ---------------------------------------------------------
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, string* userp) {
     size_t totalSize = size * nmemb;
@@ -15,42 +24,37 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, string* userp) {
 }
 
 // ---------------------------------------------------------
-// HTTP Fetcher: Downloads the raw HTML of a page
+// HTTP Fetcher
 // ---------------------------------------------------------
-std::string fetchHTML(const std::string& url) {
+string fetchHTML(const string& url) {
     CURL* curl;
     CURLcode res;
-    std::string readBuffer;
+    string readBuffer;
 
     curl = curl_easy_init();
     if(curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &readBuffer);
-        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // 10-second timeout
-        
-        // ADDED: The User-Agent Header to bypass basic bot blocking
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); 
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); 
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "Bhavya_Crawler/1.0 (Student System Design Project)");
 
-        // Perform the request
         res = curl_easy_perform(curl);
         if(res != CURLE_OK) {
-            std::cerr << "  -> curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+            lock_guard<mutex> lock(coutMutex);
+            cerr << "  -> curl failed on " << url << ": " << curl_easy_strerror(res) << "\n";
         }
-        
         curl_easy_cleanup(curl);
     }
     return readBuffer;
 }
 
 // ---------------------------------------------------------
-// HTML Parser: Extracts all href links using Regex
+// HTML Parser
 // ---------------------------------------------------------
 vector<string> extractLinks(const string& html) {
     vector<string> links;
-    
-    // Basic regex to find href="..."
     regex link_regex("<a\\s+[^>]*href=\"([^\"]*)\"");
     auto words_begin = sregex_iterator(html.begin(), html.end(), link_regex);
     auto words_end = sregex_iterator();
@@ -58,9 +62,6 @@ vector<string> extractLinks(const string& html) {
     for (sregex_iterator i = words_begin; i != words_end; ++i) {
         smatch match = *i;
         string extractedUrl = match[1].str();
-        
-        // Filter to only grab absolute http/https links for now
-        // (Ignoring relative paths like "/wiki/Main_Page")
         if (extractedUrl.find("http") == 0) {
             links.push_back(extractedUrl);
         }
@@ -69,44 +70,67 @@ vector<string> extractLinks(const string& html) {
 }
 
 // ---------------------------------------------------------
-// Main Crawler Loop
+// Worker Thread Function
 // ---------------------------------------------------------
-int main() {
-    URLFrontier frontier;
-
-    // Seed the frontier with your Wikipedia link
-    frontier.addURL("https://en.wikipedia.org/wiki/History_of_Uttar_Pradesh");
-
-    cout << "Starting crawler loop..." << endl;
-
-    // Increased iterations so you can watch it bounce between pages
-    int iterations = 0;
-    while (!frontier.isEmpty() && iterations < 50) {
+void workerThread(int workerId, URLFrontier& frontier) {
+    while (pagesCrawled < MAX_PAGES) {
         string targetUrl = frontier.getNextURL();
         
         if (!targetUrl.empty()) {
-            cout << "\n[" << iterations + 1 << "] CRAWLING: " << targetUrl << endl;
+            // Increment atomic counter
+            pagesCrawled++;
             
-            // 1. Fetch the HTML
+            {
+                // Lock console to print cleanly
+                lock_guard<mutex> lock(coutMutex);
+                cout << "[Worker " << workerId << " | Page " << pagesCrawled << "] CRAWLING: " << targetUrl << "\n";
+            }
+
+            // 1. Fetch
             string html = fetchHTML(targetUrl);
-            cout << "  -> Downloaded " << html.length() << " bytes of HTML.\n";
-
-            // 2. Extract the links
+            
+            // 2. Extract
             vector<string> newLinks = extractLinks(html);
-            cout << "  -> Extracted " << newLinks.size() << " absolute http(s) links.\n";
 
-            // 3. Feed links back into the Frontier (Bloom Filter handles duplicates)
+            // 3. Queue new links
             for (const string& link : newLinks) {
                 frontier.addURL(link);
             }
             
         } else {
-            cout << "[WAITING] Rate limited. Sleeping for 500ms..." << endl;
-            this_thread::sleep_for(chrono::milliseconds(500));
+            // Queue is empty OR the top URLs were rate-limited.
+            // Sleep briefly so we don't cause a CPU-spike (busy waiting).
+            this_thread::sleep_for(chrono::milliseconds(200));
         }
-        iterations++;
+    }
+}
+
+// ---------------------------------------------------------
+// Main Function
+// ---------------------------------------------------------
+int main() {
+    URLFrontier frontier;
+
+    // Seed the crawler
+    frontier.addURL("https://en.wikipedia.org/wiki/History_of_Uttar_Pradesh");
+
+    // Define pool size (4 threads is a safe start for standard CPUs)
+    int numThreads = 4;
+    vector<thread> threads;
+
+    cout << "Starting crawler with " << numThreads << " concurrent workers...\n\n";
+
+    // Spawn the threads
+    for (int i = 1; i <= numThreads; ++i) {
+        // ref is required to pass the frontier object by reference to the thread
+        threads.emplace_back(workerThread, i, ref(frontier));
     }
 
-    cout << "\nCrawler stopped (Hit iteration limit or queue empty)." << endl;
+    // Wait for all threads to finish
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    cout << "\nCrawler stopped. Reached maximum limit of " << MAX_PAGES << " pages.\n";
     return 0;
 }

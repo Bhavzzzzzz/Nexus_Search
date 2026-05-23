@@ -16,6 +16,8 @@ string URLFrontier::extractDomain(const string& url) {
 }
 
 void URLFrontier::addURL(const string& url) {
+
+    lock_guard<mutex> lock(mtx);
     if (visitedUrls.contains(url)) {
         return; // Discard duplicate
     }
@@ -36,6 +38,9 @@ bool URLFrontier::shouldCrawl(const string& url) {
 }
 
 string URLFrontier::getNextURL() {
+
+    lock_guard<mutex> lock(mtx);
+
     if (urlQueue.empty()) {
         return "";
     }
@@ -51,6 +56,7 @@ string URLFrontier::getNextURL() {
     }
 }
 
-bool URLFrontier::isEmpty() const {
+bool URLFrontier::isEmpty() {
+    lock_guard<mutex> lock(mtx);
     return urlQueue.empty();
 }

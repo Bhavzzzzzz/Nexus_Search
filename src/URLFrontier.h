@@ -4,12 +4,14 @@
 #include <bits/stdc++.h>
 #include "BloomFilter.h"
 #include "TokenBucket.h"
+#include <mutex>
 using namespace std;
 class URLFrontier {
 private:
     queue<string> urlQueue;
     BloomFilter visitedUrls;
     unordered_map<string, TokenBucket> domainRateLimiters;
+    mutex mtx;
 
     // Helper to parse domain from a full URL
     string extractDomain(const string& url);
@@ -20,7 +22,7 @@ public:
     void addURL(const string& url);
     string getNextURL();
     bool shouldCrawl(const string& url);
-    bool isEmpty() const;
+    bool isEmpty();
 };
 
 #endif // URL_FRONTIER_H
