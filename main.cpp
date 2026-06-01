@@ -6,6 +6,8 @@
 #include <mutex>
 #include <curl/curl.h> 
 #include "src/URLFrontier.h"
+#include "src/TextProcessor.h"
+#include "src/Indexer.h"
 
 // Thread-safe counter to limit the prototype run
 atomic<int> pagesCrawled(0);
@@ -72,35 +74,59 @@ vector<string> extractLinks(const string& html) {
 // ---------------------------------------------------------
 // Worker Thread Function
 // ---------------------------------------------------------
-void workerThread(int workerId, URLFrontier& frontier) {
+void workerThread(int workerId, URLFrontier& frontier, Indexer& index) {
     while (pagesCrawled < MAX_PAGES) {
-        string targetUrl = frontier.getNextURL();
+        std::string targetUrl = frontier.getNextURL();
         
         if (!targetUrl.empty()) {
-            // Increment atomic counter
             pagesCrawled++;
             
             {
-                // Lock console to print cleanly
-                lock_guard<mutex> lock(coutMutex);
-                cout << "[Worker " << workerId << " | Page " << pagesCrawled << "] CRAWLING: " << targetUrl << "\n";
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cout << "[Worker " << workerId << " | Page " << pagesCrawled << "] CRAWLING: " << targetUrl << "\n";
             }
 
-            // 1. Fetch
-            string html = fetchHTML(targetUrl);
-            
-            // 2. Extract
-            vector<string> newLinks = extractLinks(html);
+            try {
+                // 1. Fetch
+                std::string html = fetchHTML(targetUrl);
+                
+                // 2. Extract Links
+                std::vector<std::string> newLinks = extractLinks(html);
 
-            // 3. Queue new links
-            for (const string& link : newLinks) {
-                frontier.addURL(link);
+                // 3. Queue new links
+                for (const std::string& link : newLinks) {
+                    frontier.addURL(link);
+                }
+
+                // 4. Extract Text
+                TextProcessor processor;
+                std::vector<std::string> keywords = processor.processText(html);
+
+                {
+                    std::lock_guard<std::mutex> lock(coutMutex);
+                    std::cout << "  -> Extracted " << keywords.size() << " valid keywords.\n";
+                    if (!keywords.empty()) {
+                        std::cout << "     Sample: " << keywords[0];
+                        if (keywords.size() > 1) std::cout << ", " << keywords[1];
+                        std::cout << "\n";
+                        index.addDocument(targetUrl,keywords);
+                    }
+                }
+            } 
+            catch (const std::exception& e) {
+                // If anything goes wrong, the thread survives!
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cerr << "  -> [ERROR] Worker " << workerId << " crashed on " << targetUrl 
+                          << " | Reason: " << e.what() << "\n";
+            }
+            catch (...) {
+                // Catch absolute worst-case scenario unknown errors
+                std::lock_guard<std::mutex> lock(coutMutex);
+                std::cerr << "  -> [CRITICAL ERROR] Worker " << workerId << " encountered an unknown crash on " << targetUrl << "\n";
             }
             
         } else {
-            // Queue is empty OR the top URLs were rate-limited.
-            // Sleep briefly so we don't cause a CPU-spike (busy waiting).
-            this_thread::sleep_for(chrono::milliseconds(200));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
     }
 }
@@ -114,6 +140,7 @@ int main() {
     // Seed the crawler
     frontier.addURL("https://en.wikipedia.org/wiki/History_of_Uttar_Pradesh");
 
+    Indexer globalIndex;
     // Define pool size (4 threads is a safe start for standard CPUs)
     int numThreads = 4;
     vector<thread> threads;
@@ -123,7 +150,7 @@ int main() {
     // Spawn the threads
     for (int i = 1; i <= numThreads; ++i) {
         // ref is required to pass the frontier object by reference to the thread
-        threads.emplace_back(workerThread, i, ref(frontier));
+        threads.emplace_back(workerThread, i, ref(frontier), ref(globalIndex));
     }
 
     // Wait for all threads to finish
@@ -132,5 +159,24 @@ int main() {
     }
 
     cout << "\nCrawler stopped. Reached maximum limit of " << MAX_PAGES << " pages.\n";
+    
+    globalIndex.printStats();
+
+    std::cout << "\n--- SEARCH ENGINE PROTOTYPE ---\n";
+    while (true) {
+        std::string query;
+        std::cout << "Enter a keyword to search (or type 'exit'): ";
+        std::cin >> query;
+
+        if (query == "exit") break;
+
+        std::vector<std::string> results = globalIndex.search(query);
+        
+        std::cout << "Found " << results.size() << " results for '" << query << "':\n";
+        for (size_t i = 0; i < std::min(results.size(), (size_t)5); ++i) {
+            std::cout << "  " << i+1 << ". " << results[i] << "\n";
+        }
+    }
+
     return 0;
 }

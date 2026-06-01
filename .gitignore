@@ -1,4 +1,5 @@
 *.exe
 *.out
 .vscode
-./crawler_prototype
+crawler_prototype
+run_command.txt
