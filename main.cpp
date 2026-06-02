@@ -163,17 +163,21 @@ int main() {
     globalIndex.printStats();
 
     std::cout << "\n--- SEARCH ENGINE PROTOTYPE ---\n";
+    // Clear the input buffer before starting the loop
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
+
     while (true) {
         std::string query;
-        std::cout << "Enter a keyword to search (or type 'exit'): ";
-        std::cin >> query;
+        std::cout << "Enter a keyword or phrase to search (or type 'exit'): ";
+        std::getline(std::cin, query); // Use getline to capture spaces!
 
         if (query == "exit") break;
+        if (query.empty()) continue;
 
         std::vector<std::string> results = globalIndex.search(query);
         
         std::cout << "Found " << results.size() << " results for '" << query << "':\n";
-        for (size_t i = 0; i < std::min(results.size(), (size_t)5); ++i) {
+        for (size_t i = 0; i < std::min(results.size(), (size_t)10); ++i) {
             std::cout << "  " << i+1 << ". " << results[i] << "\n";
         }
     }
