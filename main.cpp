@@ -98,20 +98,33 @@ void workerThread(int workerId, URLFrontier& frontier, Indexer& index) {
                     frontier.addURL(link);
                 }
 
-                // 4. Extract Text
                 TextProcessor processor;
+                std::string cleanText = processor.stripHTML(html);
+
+                // NEW: Language Check!
+                if (!processor.isLikelyEnglish(cleanText)) {
+                    std::lock_guard<std::mutex> lock(coutMutex);
+                    std::cout << "  -> [SKIPPED] Non-English page detected: " << targetUrl << "\n";
+                    continue; // Skip the rest of the loop and grab the next URL!
+                }
+
+                // If it IS English, proceed to tokenize and index
                 std::vector<std::string> keywords = processor.processText(html);
+                
+                if (keywords.empty()) {
+                    std::lock_guard<std::mutex> lock(coutMutex);
+                    std::cout << "  -> [SKIPPED] Page has no usable keywords: " << targetUrl << "\n";
+                    continue; 
+                }
+
+                // Add to index
+                index.addDocument(targetUrl, keywords);
 
                 {
                     std::lock_guard<std::mutex> lock(coutMutex);
-                    std::cout << "  -> Extracted " << keywords.size() << " valid keywords.\n";
-                    if (!keywords.empty()) {
-                        std::cout << "     Sample: " << keywords[0];
-                        if (keywords.size() > 1) std::cout << ", " << keywords[1];
-                        std::cout << "\n";
-                        index.addDocument(targetUrl,keywords);
-                    }
+                    std::cout << "  -> Indexed " << keywords.size() << " words.\n";
                 }
+
             } 
             catch (const std::exception& e) {
                 // If anything goes wrong, the thread survives!
@@ -153,7 +166,7 @@ int main() {
 
     if (mode == 1) {
         URLFrontier frontier;
-        frontier.addURL("https://en.wikipedia.org/wiki/History_of_Uttar_Pradesh");
+        frontier.addURL("https://myanimelist.net/anime");
 
         int numThreads = 4;
         std::vector<std::thread> threads;
@@ -187,8 +200,6 @@ int main() {
     globalIndex.printStats();
 
     std::cout << "\n--- SEARCH ENGINE PROTOTYPE ---\n";
-    
-    // Clear the input buffer to prevent getline issues after reading 'mode'
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
 
     while (true) {
@@ -199,11 +210,14 @@ int main() {
         if (query == "exit") break;
         if (query.empty()) continue;
 
-        std::vector<std::string> results = globalIndex.search(query);
+        // CHANGED: Now receives pairs of (URL, Score)
+        std::vector<std::pair<std::string, double>> results = globalIndex.search(query);
         
         std::cout << "Found " << results.size() << " results for '" << query << "':\n";
+        
         for (size_t i = 0; i < std::min(results.size(), (size_t)10); ++i) {
-            std::cout << "  " << i+1 << ". " << results[i] << "\n";
+            // Print the rank, the URL, and the mathematically calculated score!
+            std::cout << "  " << i+1 << ". [Score: " << results[i].second << "] " << results[i].first << "\n";
         }
     }
 

@@ -84,6 +84,32 @@ public:
         return cleanText;
     }
 
+    // Add this inside the TextProcessor class, right below stripHTML
+
+    bool isLikelyEnglish(const std::string& cleanText) {
+        if (cleanText.empty()) return false;
+
+        int nonAsciiCount = 0;
+        int totalChars = 0;
+
+        for (char c : cleanText) {
+            // We only count actual letters/text, ignoring spaces
+            if (c != ' ') {
+                totalChars++;
+                // If the byte value is outside standard ASCII (0-127)
+                if (static_cast<unsigned char>(c) > 127) {
+                    nonAsciiCount++;
+                }
+            }
+        }
+
+        if (totalChars == 0) return false;
+
+        // If more than 10% of the text is non-ASCII, it is not English
+        double foreignRatio = (double)nonAsciiCount / totalChars;
+        return foreignRatio < 0.10; 
+    }
+    
     // 2, 3 & 4. Tokenize, Lowercase, Remove Stop Words, and Stem
     std::vector<std::string> processText(const std::string& rawHtml) {
         std::string text = stripHTML(rawHtml);

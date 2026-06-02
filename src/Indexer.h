@@ -7,122 +7,138 @@
 #include <unordered_set>
 #include <mutex>
 #include <iostream>
-#include <fstream>  // ADDED: For file writing/reading
-#include <sstream>  // ADDED: For string splitting
+#include <fstream>
+#include <sstream>
+#include <cmath>     // ADDED: For log()
+#include <algorithm> // ADDED: For sort()
 #include "TextProcessor.h"
 
 class Indexer {
 private:
-    std::unordered_map<std::string, std::unordered_set<std::string>> invertedIndex;
+    // Core Map: Keyword -> (URL -> Frequency Count)
+    std::unordered_map<std::string, std::unordered_map<std::string, int>> invertedIndex;
+    
+    // Track all unique URLs seen to calculate Total Documents (N) for IDF
+    std::unordered_set<std::string> allDocuments;
     std::mutex indexMutex;
 
 public:
     void addDocument(const std::string& url, const std::vector<std::string>& words) {
         std::lock_guard<std::mutex> lock(indexMutex);
+        allDocuments.insert(url); // Track total universe of URLs
+        
         for (const std::string& word : words) {
-            invertedIndex[word].insert(url);
+            invertedIndex[word][url]++; // Increment frequency!
         }
     }
 
-    std::vector<std::string> search(const std::string& rawQuery) {
+    // CHANGED: Now returns a pair of <URL, Score>
+    std::vector<std::pair<std::string, double>> search(const std::string& rawQuery) {
         std::lock_guard<std::mutex> lock(indexMutex);
         TextProcessor processor;
         std::vector<std::string> queryWords = processor.processText(rawQuery);
         
         if (queryWords.empty()) return {};
 
+        // 1. Set Intersection (Find URLs containing ALL words)
         std::string firstWord = queryWords[0];
-        if (invertedIndex.find(firstWord) == invertedIndex.end()) {
-            return {}; 
-        }
+        if (invertedIndex.find(firstWord) == invertedIndex.end()) return {}; 
 
-        std::unordered_set<std::string> resultURLs = invertedIndex[firstWord];
+        std::unordered_set<std::string> validURLs;
+        for (const auto& pair : invertedIndex[firstWord]) {
+            validURLs.insert(pair.first); // pair.first is the URL
+        }
 
         for (size_t i = 1; i < queryWords.size(); ++i) {
             const std::string& currentWord = queryWords[i];
             if (invertedIndex.find(currentWord) == invertedIndex.end()) return {}; 
 
-            const std::unordered_set<std::string>& wordURLs = invertedIndex[currentWord];
             std::unordered_set<std::string> intersectedURLs;
-
-            for (const std::string& url : resultURLs) {
-                if (wordURLs.find(url) != wordURLs.end()) {
-                    intersectedURLs.insert(url);
+            for (const auto& pair : invertedIndex[currentWord]) {
+                if (validURLs.find(pair.first) != validURLs.end()) {
+                    intersectedURLs.insert(pair.first);
                 }
             }
-            
-            resultURLs = intersectedURLs;
-            if (resultURLs.empty()) return {};
+            validURLs = intersectedURLs;
+            if (validURLs.empty()) return {};
         }
 
-        std::vector<std::string> results;
-        for (const std::string& url : resultURLs) {
-            results.push_back(url);
+        // 2. TF-IDF Scoring
+        int N = allDocuments.size(); // Total documents in corpus
+        std::vector<std::pair<std::string, double>> rankedResults;
+
+        for (const std::string& url : validURLs) {
+            double totalScore = 0.0;
+            
+            for (const std::string& word : queryWords) {
+                // TF: How many times this word is on this specific URL
+                double tf = invertedIndex[word][url];
+                
+                // IDF: log( Total Docs / Docs containing this word )
+                double df = invertedIndex[word].size();
+                double idf = std::log( (double)N / (1.0 + df) ); // +1.0 prevents division by zero
+
+                totalScore += (tf * idf);
+            }
+            rankedResults.push_back({url, totalScore});
         }
-        return results;
+
+        // 3. Sort Results by Score (Descending)
+        std::sort(rankedResults.begin(), rankedResults.end(), 
+            [](const std::pair<std::string, double>& a, const std::pair<std::string, double>& b) {
+                return a.second > b.second; 
+            });
+
+        return rankedResults;
     }
 
     void printStats() {
         std::lock_guard<std::mutex> lock(indexMutex);
         std::cout << "\n--- INDEX STATS ---\n";
         std::cout << "Total unique keywords indexed: " << invertedIndex.size() << "\n";
+        std::cout << "Total documents processed: " << allDocuments.size() << "\n";
     }
 
-    // ---------------------------------------------------------
-    // NEW: Save the index to a text file
-    // ---------------------------------------------------------
+    // UPDATED: Save formatting is now -> keyword url1 count1 url2 count2...
     void saveToDisk(const std::string& filename) {
         std::lock_guard<std::mutex> lock(indexMutex);
         std::ofstream outFile(filename);
-        
-        if (!outFile.is_open()) {
-            std::cerr << "[ERROR] Could not open " << filename << " for writing.\n";
-            return;
-        }
+        if (!outFile.is_open()) return;
 
         for (const auto& pair : invertedIndex) {
-            outFile << pair.first; // Write the keyword
-            for (const std::string& url : pair.second) {
-                outFile << " " << url; // Write each URL separated by a space
+            outFile << pair.first; 
+            for (const auto& urlData : pair.second) {
+                outFile << " " << urlData.first << " " << urlData.second; 
             }
-            outFile << "\n"; // New line for the next keyword
+            outFile << "\n"; 
         }
-        
         outFile.close();
-        std::cout << "[SUCCESS] Index saved to " << filename << " (" << invertedIndex.size() << " keywords).\n";
+        std::cout << "[SUCCESS] Index saved to " << filename << "\n";
     }
 
-    // ---------------------------------------------------------
-    // NEW: Load the index from a text file
-    // ---------------------------------------------------------
     void loadFromDisk(const std::string& filename) {
         std::lock_guard<std::mutex> lock(indexMutex);
         std::ifstream inFile(filename);
-        
-        if (!inFile.is_open()) {
-            std::cerr << "[ERROR] Could not open " << filename << " for reading.\n";
-            return;
-        }
+        if (!inFile.is_open()) return;
 
-        invertedIndex.clear(); // Clear any existing data in RAM
+        invertedIndex.clear(); 
+        allDocuments.clear();
         std::string line;
         
         while (std::getline(inFile, line)) {
             std::istringstream stream(line);
-            std::string word;
+            std::string word, url;
+            int count;
             
-            // The first token on the line is the keyword
             if (stream >> word) {
-                std::string url;
-                // Every subsequent token is a URL
-                while (stream >> url) {
-                    invertedIndex[word].insert(url);
+                while (stream >> url >> count) {
+                    invertedIndex[word][url] = count;
+                    allDocuments.insert(url);
                 }
             }
         }
-        
         inFile.close();
-        std::cout << "[SUCCESS] Index loaded from " << filename << " (" << invertedIndex.size() << " keywords).\n";
+        std::cout << "[SUCCESS] Index loaded from " << filename << "\n";
     }
 };
 
