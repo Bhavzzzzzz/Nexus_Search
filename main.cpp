@@ -134,42 +134,67 @@ void workerThread(int workerId, URLFrontier& frontier, Indexer& index) {
 // ---------------------------------------------------------
 // Main Function
 // ---------------------------------------------------------
+// ---------------------------------------------------------
+// Main Function
+// ---------------------------------------------------------
 int main() {
-    URLFrontier frontier;
-
-    // Seed the crawler
-    frontier.addURL("https://en.wikipedia.org/wiki/History_of_Uttar_Pradesh");
-
     Indexer globalIndex;
-    // Define pool size (4 threads is a safe start for standard CPUs)
-    int numThreads = 4;
-    vector<thread> threads;
+    std::string indexFilename = "search_index.dat";
 
-    cout << "Starting crawler with " << numThreads << " concurrent workers...\n\n";
-
-    // Spawn the threads
-    for (int i = 1; i <= numThreads; ++i) {
-        // ref is required to pass the frontier object by reference to the thread
-        threads.emplace_back(workerThread, i, ref(frontier), ref(globalIndex));
-    }
-
-    // Wait for all threads to finish
-    for (auto& t : threads) {
-        t.join();
-    }
-
-    cout << "\nCrawler stopped. Reached maximum limit of " << MAX_PAGES << " pages.\n";
+    std::cout << "==========================================\n";
+    std::cout << "      DISTRIBUTED SEARCH ENGINE v1.0      \n";
+    std::cout << "==========================================\n";
+    std::cout << "1. Run Crawler (Build new index)\n";
+    std::cout << "2. Load Index from Disk (Fast startup)\n";
+    std::cout << "Select mode (1 or 2): ";
     
+    int mode;
+    std::cin >> mode;
+
+    if (mode == 1) {
+        URLFrontier frontier;
+        frontier.addURL("https://en.wikipedia.org/wiki/History_of_Uttar_Pradesh");
+
+        int numThreads = 4;
+        std::vector<std::thread> threads;
+
+        std::cout << "\nStarting crawler with " << numThreads << " concurrent workers...\n\n";
+
+        for (int i = 1; i <= numThreads; ++i) {
+            threads.emplace_back(workerThread, i, std::ref(frontier), std::ref(globalIndex));
+        }
+
+        for (auto& t : threads) {
+            t.join();
+        }
+
+        std::cout << "\nCrawler stopped. Reached maximum limit of " << MAX_PAGES << " pages.\n";
+        
+        // Save the index to disk immediately after crawling finishes!
+        globalIndex.saveToDisk(indexFilename);
+
+    } else if (mode == 2) {
+        std::cout << "\nLoading existing index from disk...\n";
+        globalIndex.loadFromDisk(indexFilename);
+    } else {
+        std::cout << "Invalid mode selected. Exiting.\n";
+        return 1;
+    }
+
+    // ---------------------------------------------------------
+    // The Search Interface
+    // ---------------------------------------------------------
     globalIndex.printStats();
 
     std::cout << "\n--- SEARCH ENGINE PROTOTYPE ---\n";
-    // Clear the input buffer before starting the loop
+    
+    // Clear the input buffer to prevent getline issues after reading 'mode'
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); 
 
     while (true) {
         std::string query;
         std::cout << "Enter a keyword or phrase to search (or type 'exit'): ";
-        std::getline(std::cin, query); // Use getline to capture spaces!
+        std::getline(std::cin, query); 
 
         if (query == "exit") break;
         if (query.empty()) continue;
