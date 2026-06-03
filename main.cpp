@@ -145,8 +145,18 @@ void workerThread(int workerId, URLFrontier& frontier, Indexer& index) {
 }
 
 // ---------------------------------------------------------
-// Main Function
+// Helper: Validate HTTP/HTTPS URLs
 // ---------------------------------------------------------
+bool isValidURL(const std::string& url) {
+    // Regex breakdown: 
+    // ^(https?://) -> Must start with http:// or https://
+    // [a-zA-Z0-9.-]+ -> Domain name (letters, numbers, dots, hyphens)
+    // \.[a-zA-Z]{2,} -> Top level domain (like .com, .org)
+    // (/[^\s]*)?$ -> Optional path at the end, no spaces allowed
+    std::regex url_regex("^(https?://)[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(/[^\\s]*)?$");
+    return std::regex_match(url, url_regex);
+}
+
 // ---------------------------------------------------------
 // Main Function
 // ---------------------------------------------------------
@@ -165,13 +175,27 @@ int main() {
     std::cin >> mode;
 
     if (mode == 1) {
+        std::string startUrl;
+        
+        // NEW: Trap the user until they provide a valid URL
+        while (true) {
+            std::cout << "\nEnter the starting URL (must include http:// or https://): ";
+            std::cin >> startUrl;
+            
+            if (isValidURL(startUrl)) {
+                break; // Exit the loop, the URL is good!
+            } else {
+                std::cout << "[ERROR] Invalid URL format. Please try again.\n";
+            }
+        }
+
         URLFrontier frontier;
-        frontier.addURL("https://myanimelist.net/anime");
+        frontier.addURL(startUrl);
 
         int numThreads = 4;
         std::vector<std::thread> threads;
 
-        std::cout << "\nStarting crawler with " << numThreads << " concurrent workers...\n\n";
+        std::cout << "\nStarting crawler on " << startUrl << " with " << numThreads << " concurrent workers...\n\n";
 
         for (int i = 1; i <= numThreads; ++i) {
             threads.emplace_back(workerThread, i, std::ref(frontier), std::ref(globalIndex));
@@ -183,7 +207,6 @@ int main() {
 
         std::cout << "\nCrawler stopped. Reached maximum limit of " << MAX_PAGES << " pages.\n";
         
-        // Save the index to disk immediately after crawling finishes!
         globalIndex.saveToDisk(indexFilename);
 
     } else if (mode == 2) {
