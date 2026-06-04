@@ -1,6 +1,6 @@
-#  C++ Distributed Search Engine
+#  C++ Concurrent Search Engine
 
-A high-performance, concurrent web crawler and search engine built entirely from scratch in modern C++17. This project implements a full Information Retrieval pipeline, from scraping HTML across distributed worker threads to ranking results using mathematically rigorous TF-IDF algorithms via a built-in REST API.
+Multi-threaded web crawler and TF-IDF search engine in C++17. Features a Bloom Filter URL deduplicator, Token Bucket rate limiter, inverted index with disk persistence, and a REST API with browser-based search UI. (libcurl, cpp-httplib, CMake)
 
 ## Key Features
 
@@ -34,7 +34,7 @@ This project uses CMake for out-of-source builds to keep the directory clean.
 ```bash
 # 1. Clone the repository
 git clone [https://github.com/Bhavzzzzzz/Nexus_Search.git](https://github.com/Bhavzzzzzz/Nexus_Search.git)
-cd Nexus_Search.git
+cd Nexus_Search
 
 # 2. Create a build directory
 mkdir build
