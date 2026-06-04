@@ -75,4 +75,4 @@ Indexer.h: Thread-safe Inverted Index, TF-IDF mathematics, and Disk I/O.
 WebServer.h: Embedded HTTP server and HTML/JS frontend.
 
 Author
-[Bhavzzzzzz] - Backend & Systems Engineer
+[Bhavzzzzzz]
