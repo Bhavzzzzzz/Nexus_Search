@@ -4,3 +4,4 @@
 crawler_prototype
 run_command.txt
 search_index.dat
+src/httplib.h

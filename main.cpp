@@ -8,6 +8,7 @@
 #include "src/URLFrontier.h"
 #include "src/TextProcessor.h"
 #include "src/Indexer.h"
+#include "src/WebServer.h"
 
 // Thread-safe counter to limit the prototype run
 atomic<int> pagesCrawled(0);
@@ -168,8 +169,9 @@ int main() {
     std::cout << "      DISTRIBUTED SEARCH ENGINE v1.0      \n";
     std::cout << "==========================================\n";
     std::cout << "1. Run Crawler (Build new index)\n";
-    std::cout << "2. Load Index from Disk (Fast startup)\n";
-    std::cout << "Select mode (1 or 2): ";
+    std::cout << "2. CLI Search (Terminal mode)\n";
+    std::cout << "3. Start Web Server (Browser mode)\n"; // NEW OPTION
+    std::cout << "Select mode (1, 2, or 3): ";
     
     int mode;
     std::cin >> mode;
@@ -212,7 +214,16 @@ int main() {
     } else if (mode == 2) {
         std::cout << "\nLoading existing index from disk...\n";
         globalIndex.loadFromDisk(indexFilename);
-    } else {
+    }
+    else if (mode == 3) {
+        std::cout << "\nLoading existing index from disk...\n";
+        globalIndex.loadFromDisk(indexFilename);
+        
+        // Instantiate our new class and start the server!
+        WebServer server(globalIndex);
+        server.start(8081);
+    }
+    else {
         std::cout << "Invalid mode selected. Exiting.\n";
         return 1;
     }
